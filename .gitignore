@@ -1,0 +1,11 @@
+# MASM files
+\MASM611
+
+# Helper files
+\pack
+
+# Object and executable files
+*.exe
+*.EXE
+*.obj
+*.OBJ
