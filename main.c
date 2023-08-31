@@ -2,34 +2,96 @@
 #include <stdlib.h>
 #include <string.h>
 
+char my_argv[64] = "  -o file.txt -f input.txt -n a -a";
+char *argv_cursor = my_argv;
+char *token;
+
+int my_atoi(char *str)
+{
+    int result = 0;
+
+    while (*str != '\0')
+    {
+        if (*str < '0' || *str > '9')
+        {
+            return -1;
+        }
+
+        result *= 10;
+        result += *str;
+        result -= '0';
+        str++;
+    }
+
+    return result;
+}
+
+void argv_tok()
+{
+    // handle beginning of the string containing delims
+    while (1)
+    {
+        if (*argv_cursor == ' ')
+        {
+            argv_cursor++;
+            continue;
+        }
+        if (*argv_cursor == '\0')
+        {
+            token = NULL;
+            return;
+        }
+        break;
+    }
+
+    token = argv_cursor;
+    while (1)
+    {
+        if (*argv_cursor == '\0')
+        {
+            /*end of the input string and
+            next exec will return NULL*/
+            return;
+        }
+        if (*argv_cursor == ' ')
+        {
+            *argv_cursor = '\0';
+            argv_cursor++;
+            return;
+        }
+        argv_cursor++;
+    }
+}
+
 void get_options()
 {
-    char argv_str[] = "-o file.txt -f input.txt -n 10 -+ -adadaap";
-
     char *input_file = NULL;
     char *output_file = "a.out";
     int group_size = 0;
     int group_size_provided = 0;
     int include_a = 0, include_t = 0, include_c = 0, include_g = 0, include_plus = 0;
 
-    char *token = strtok(argv_str, " ");
+    argv_tok();
     while (token != NULL)
     {
-        if (token[0] == '-')
+        if (*token == '-')
         {
-            // Iterate through the characters after '-'
-            for (int i = 1; i < strlen(token); i++)
+            char *token_cursor = token + 1;
+            while (*token_cursor != '\0')
             {
-                switch (token[i])
+                switch (*token_cursor)
                 {
                 case 'f':
-                    input_file = strtok(NULL, " ");
+                    argv_tok();
+                    input_file = token;
                     break;
                 case 'o':
-                    output_file = strtok(NULL, " ");
+                    argv_tok();
+                    output_file = token;
                     break;
                 case 'n':
-                    group_size = atoi(strtok(NULL, " "));
+                    argv_tok();
+                    group_size = my_atoi(token);
                     if (!(group_size >= 1))
                     {
                         printf("Erro: parâmetro -n inválido. Informe um número maior ou igual a 1.\n");
@@ -56,9 +118,10 @@ void get_options()
                     printf("Erro: opção %s é inválida.\n", token);
                     return;
                 }
+                token_cursor++;
             }
         }
-        token = strtok(NULL, " ");
+        argv_tok();
     }
 
     if (input_file == NULL)
@@ -89,6 +152,11 @@ void get_options()
 
 int main()
 {
+    printf("-----------------------------------------------------------------\n");
+    printf("String: %s\n", argv_cursor);
+    printf("-----------------------------------------------------------------\n");
+
     get_options();
+
     return 0;
 }
