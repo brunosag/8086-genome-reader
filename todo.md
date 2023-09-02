@@ -3,13 +3,14 @@
 ## Program initialization
 
 - [x] Get command-line arguments
-- [ ] Store option: char *input_file
-- [ ] Store option: char *output_file
-- [ ] Store option: int group_size
-- [ ] Store option: bool include_a, include_t, include_c, include_g, include_+
-- [ ] Handle error: missing option
-- [ ] Handle error: invalid option
-- [ ] Handle error: invalid parameter
+- [x] Store option: char *input_file
+- [x] Store option: char *output_file
+- [x] Store option: int group_size
+- [x] Store option: bool include_a, include_t, include_c, include_g, include_plus
+- [x] Handle error: missing option
+- [x] Handle error: invalid option
+- [x] Handle error: invalid parameter
+- [x] Handle error: duplicate option
 
 ## Input file reading
 
