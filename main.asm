@@ -1,3 +1,16 @@
+;======================================================================================================================
+;   8086_genome_reader
+;======================================================================================================================
+;
+;   Autor:			Bruno Samuel A. Gonçalves
+;   Data:			08/2023
+;   Descrição:		Um leitor de sequências de DNA em linguagem de montagem para a arquitetura Intel 8086.
+;
+;   Utilização:
+;		./main -f <input_file> -o <output_file> -n <base_group_size> -<actg+>
+;
+;======================================================================================================================
+
 .model small
 .stack
 
@@ -94,6 +107,7 @@ msg_duplicate_n				db		"ERRO: opção -n foi fornecida mais de uma vez. Informe 
 ;======================================================================================================================
 ;	Segmento de código
 ;======================================================================================================================
+
 .code
 .startup
 				call	get_argv					; Obter string da linha de comando
@@ -101,152 +115,14 @@ msg_duplicate_n				db		"ERRO: opção -n foi fornecida mais de uma vez. Informe 
 				call	get_options					; Extrair opções da linha de commando
 
 				int_terminate	return_code			; Terminar programa com código de sucesso
+
 .exit
 
-;======================================================================================================================
-;	void		argv_tok()
-;======================================================================================================================
-argv_tok		proc	near
-
-				push	bx							; Salvar registradores
-				mov		bx, argv_cursor				; Carregar cursor do argv em BX
-
-check_space_start:
-				mov		dl, [bx]					; Verificar SPACE no início da string
-				cmp		dl, SPACE
-				jne		check_nul_start
-				inc		bx							; Pular caractere
-				jmp		check_space_start
-
-check_nul_start:
-				cmp		dl, NUL						; Verificar NUL no início da string
-				jne		get_token
-				mov		token, NUL					; Salvar token nulo
-				jmp		argv_tok_end
-
-get_token:
-				mov		token, bx					; Salvar endereço de início do token
-
-check_space_end:
-				mov		dl, [bx]					; Verificar SPACE
-				cmp		dl, SPACE
-				jne		check_nul_end
-				mov 	byte ptr [bx], NUL			; Substituir SPACE por NUL para indicar fim do token
-				inc		bx							; Pular caractere para próximo token
-				jmp		argv_tok_end
-
-check_nul_end:
-				cmp		dl, NUL						; Vericiar NUL
-				je		argv_tok_end
-
-				inc		bx							; Próximo caractere
-				jmp		check_space_end
-
-argv_tok_end:
-				mov		argv_cursor, bx				; Salvar posição atual do cursor
-				pop		bx							; Retornar registradores
-				ret
-
-argv_tok		endp
-
-;======================================================================================================================
-;	int -> CX	divide_by_ten(int n -> CX)
-;======================================================================================================================
-divide_by_ten	proc	near
-
-				push	ax							; Salvar registradores
-				push	bx
-				push	dx
-
-				mov		ax, cx						; CX <- CX / 10
-				mov		dx, 0
-				mov		bx, 10
-				div		bx
-				mov		cx, ax
-
-				pop		dx							; Retornar registradores
-				pop		bx
-				pop		ax
-
-				ret
-
-divide_by_ten	endp
-
-;======================================================================================================================
-;	void		printf_d(int n -> BX)
-;======================================================================================================================
-printf_d		proc	near
-
-				mov		cx, 10000					; Inicializar contador
-				mov		leading_zero, TRUE			; Ativar flag de zero à esquerda
-
-printf_d_loop:
-				cmp		cx, 1						; while (CX > 1)
-				jng		printf_d_end
-
-				mov		dx, 0						; DX <- 0
-				mov		ax, bx						; AX <- n
-				div		cx							; DX <- (DX:AX) % CX
-				mov		ax, dx						; AX <- DX
-				call	divide_by_ten				; CX <- CX / 10
-				mov		dx, 0						; DX <- 0
-				div		cx							; AX <- (DX:AX) / CX
-
-				cmp		ax, 0						; Verificar se valor é 0
-				jne		printf_d_put
-				cmp		cx, 1						; Verificar se é o último dígito
-				je		printf_d_put
-				cmp		leading_zero, TRUE			; Verificar se é zero a esquerda
-				je		printf_d_loop
-
-printf_d_put:
-				mov		leading_zero, FALSE			; Desativar flag de zero à esquerda
-				mov		dl, al						; DL <- AL
-				add		dl, '0'						; Converter dígito para caractere
-				int_putchar							; Imprimir dígito
-				jmp		printf_d_loop
-
-printf_d_end:
-				ret
-
-printf_d		endp
-
-;======================================================================================================================
-;	void		printf_s(char *str -> BX, char *param -> AX)
-;======================================================================================================================
-printf_s		proc	near
-
-				push	bx							; Salvar registradores
-
-printf_s_loop:
-				mov		dl, [bx]					; Obter caractere atual
-				cmp		dl, NUL						; Verificar fim da string
-				je		printf_s_end
-				cmp		dl, '%'						; Verificar placeholder de parâmetro
-				je		printf_s_param
-
-				int_putchar							; Imprimir caractere
-
-printf_s_next:
-				inc		bx							; Próximo caractere
-				jmp		printf_s_loop
-
-printf_s_param:
-				push	bx							; Imprimir string parâmetro
-				mov		bx, ax
-				call	printf_s
-				pop		bx
-				jmp		printf_s_next
-
-printf_s_end:
-				pop		bx							; Retornar registradores
-				ret
-
-printf_s		endp
-
-;======================================================================================================================
-;	void		get_argv()
-;======================================================================================================================
+;----------------------------------------------------------------------------------------------------------------------
+;	getargv
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para obter a string de argumentos da linha de comando e armazenar na variável 'argv'.
+;----------------------------------------------------------------------------------------------------------------------
 get_argv		proc	near
 
 				push	ds							; Salvar registradores de segmentos
@@ -273,129 +149,11 @@ get_argv		proc	near
 
 get_argv		endp
 
-;======================================================================================================================
-;	void		handle_error(int error_code -> DL, char *token -> AX)
-;======================================================================================================================
-handle_error	proc	near
-
-				push	bx							; Salvar registradores
-
-				cmp		dl, ERROR_INVALID_N			; Switch case para código de erro
-				je		load_invalid_n
-				cmp		dl, ERROR_INVALID_OPTION
-				je		load_invalid_option
-				cmp		dl, ERROR_MISSING_F
-				je		load_missing_f
-				cmp		dl, ERROR_MISSING_N
-				je		load_missing_n
-				cmp		dl, ERROR_MISSING_ACTG
-				je		load_missing_atcg
-				cmp		dl, ERROR_DUPLICATE_F
-				je		load_duplicate_f
-				cmp		dl, ERROR_DUPLICATE_O
-				je		load_duplicate_o
-				cmp		dl, ERROR_DUPLICATE_N
-				je		load_duplicate_n
-
-load_invalid_n:
-				lea		bx, msg_invalid_n			; Carregar mensagem de "INVALID_N"
-				jmp		print_msg
-
-load_invalid_option:
-				lea		bx, msg_invalid_option		; Carregar mensagem de "INVALID_OPTION"
-				jmp		print_msg
-
-load_missing_f:
-				lea		bx, msg_missing_f			; Carregar mensagem de "MISSING_F"
-				jmp		print_msg
-
-load_missing_n:
-				lea		bx, msg_missing_n			; Carregar mensagem de "MISSING_N"
-				jmp		print_msg
-
-load_missing_atcg:
-				lea		bx, msg_missing_atcg		; Carregar mensagem de "MISSING_ACTG"
-				jmp		print_msg
-
-load_duplicate_f:
-				lea		bx, msg_duplicate_f			; Carregar mensagem de "DUPLICATE_F"
-				jmp		print_msg
-
-load_duplicate_o:
-				lea		bx, msg_duplicate_o			; Carregar mensagem de "DUPLICATE_O"
-				jmp		print_msg
-
-load_duplicate_n:
-				lea		bx, msg_duplicate_n			; Carregar mensagem de "DUPLICATE_N"
-				jmp		print_msg
-
-print_msg:
-				call	printf_s					; Imprimir mensagem
-				line_feed
-				mov		return_code, dl				; Atualizar código de retorno
-				pop		bx							; Salvar registradores
-				ret
-
-handle_error	endp
-
-;======================================================================================================================
-;	int -> CX	strlen(char *str -> SI)
-;======================================================================================================================
-strlen			proc	near
-
-				push	si							; Salvar registradores
-				mov		cx, 0						; Zerar contador
-
-count_char:
-				cmp		byte ptr [si], NUL			; Verificar fim da string
-				je		strlen_end
-				inc		cx							; Incrementar contador
-				inc		si							; Próximo caractere
-				jmp		count_char
-
-strlen_end:
-				pop		si							; Retornar registradores
-				ret
-
-strlen			endp
-
-;======================================================================================================================
-;	int -> AX	atoi(char *str -> SI)
-;======================================================================================================================
-atoi			proc	near
-
-				push	bx							; Salvar registradores
-				mov		ax, 0						; Zerar acumulador
-				mov		bl, 10						; Definir 10 como parâmetro para MUL
-
-check_nul:
-				cmp		byte ptr [si], NUL			; Verificar fim da string
-				je		atoi_end
-
-				cmp		byte ptr [si], '0'			; Verificar caractere não numérico
-				jl		atoi_error
-				cmp		byte ptr [si], '9'
-				jg		atoi_error
-
-				mul		bl							; AX <- AL * 10
-				add		ax, [si]					; AX <- AX + caractere
-				sub		ax, '0'						; AX <- AX - '0'
-
-				inc		si							; Próximo caractere
-				jmp		check_nul
-
-atoi_error:
-				mov		ax, ERROR
-
-atoi_end:
-				pop		bx							; Retornar registradores
-				ret
-
-atoi			endp
-
-;======================================================================================================================
-;	void		get_options()
-;======================================================================================================================
+;----------------------------------------------------------------------------------------------------------------------
+;	get_options
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para extrair as opções de uma string de argumentos e as armazenar nas variáveis correspondentes.
+;----------------------------------------------------------------------------------------------------------------------
 get_options		proc	near
 
 				call	argv_tok					; Obter primeiro token
@@ -568,9 +326,317 @@ get_options_ret:
 
 get_options		endp
 
-;======================================================================================================================
-;	void		join_segments()
-;======================================================================================================================
+;----------------------------------------------------------------------------------------------------------------------
+;	argv_tok
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para realizar a segmentação de uma string de argumentos em tokens individuais, efetuando
+;	o tratamento de espaços e delimitadores.
+;----------------------------------------------------------------------------------------------------------------------
+argv_tok		proc	near
+
+				push	bx							; Salvar registradores
+				mov		bx, argv_cursor				; Carregar cursor do argv em BX
+
+check_space_start:
+				mov		dl, [bx]					; Verificar SPACE no início da string
+				cmp		dl, SPACE
+				jne		check_nul_start
+				inc		bx							; Pular caractere
+				jmp		check_space_start
+
+check_nul_start:
+				cmp		dl, NUL						; Verificar NUL no início da string
+				jne		get_token
+				mov		token, NUL					; Salvar token nulo
+				jmp		argv_tok_end
+
+get_token:
+				mov		token, bx					; Salvar endereço de início do token
+
+check_space_end:
+				mov		dl, [bx]					; Verificar SPACE
+				cmp		dl, SPACE
+				jne		check_nul_end
+				mov 	byte ptr [bx], NUL			; Substituir SPACE por NUL para indicar fim do token
+				inc		bx							; Pular caractere para próximo token
+				jmp		argv_tok_end
+
+check_nul_end:
+				cmp		dl, NUL						; Vericiar NUL
+				je		argv_tok_end
+
+				inc		bx							; Próximo caractere
+				jmp		check_space_end
+
+argv_tok_end:
+				mov		argv_cursor, bx				; Salvar posição atual do cursor
+				pop		bx							; Retornar registradores
+				ret
+
+argv_tok		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	handle_error
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para lidar com erros com base em seus códigos, exibindo uma mensagem correspondente e atualizando
+;	o código de retorno.
+;
+;	Entrada:
+;		- DL (int):		código de erro
+;		- AX (double):	endereço do token a ser imprimido como parâmetro na mensagem de erro
+;----------------------------------------------------------------------------------------------------------------------
+handle_error	proc	near
+
+				push	bx							; Salvar registradores
+
+				cmp		dl, ERROR_INVALID_N			; Switch case para código de erro
+				je		load_invalid_n
+				cmp		dl, ERROR_INVALID_OPTION
+				je		load_invalid_option
+				cmp		dl, ERROR_MISSING_F
+				je		load_missing_f
+				cmp		dl, ERROR_MISSING_N
+				je		load_missing_n
+				cmp		dl, ERROR_MISSING_ACTG
+				je		load_missing_atcg
+				cmp		dl, ERROR_DUPLICATE_F
+				je		load_duplicate_f
+				cmp		dl, ERROR_DUPLICATE_O
+				je		load_duplicate_o
+				cmp		dl, ERROR_DUPLICATE_N
+				je		load_duplicate_n
+
+load_invalid_n:
+				lea		bx, msg_invalid_n			; Carregar mensagem de "INVALID_N"
+				jmp		print_msg
+
+load_invalid_option:
+				lea		bx, msg_invalid_option		; Carregar mensagem de "INVALID_OPTION"
+				jmp		print_msg
+
+load_missing_f:
+				lea		bx, msg_missing_f			; Carregar mensagem de "MISSING_F"
+				jmp		print_msg
+
+load_missing_n:
+				lea		bx, msg_missing_n			; Carregar mensagem de "MISSING_N"
+				jmp		print_msg
+
+load_missing_atcg:
+				lea		bx, msg_missing_atcg		; Carregar mensagem de "MISSING_ACTG"
+				jmp		print_msg
+
+load_duplicate_f:
+				lea		bx, msg_duplicate_f			; Carregar mensagem de "DUPLICATE_F"
+				jmp		print_msg
+
+load_duplicate_o:
+				lea		bx, msg_duplicate_o			; Carregar mensagem de "DUPLICATE_O"
+				jmp		print_msg
+
+load_duplicate_n:
+				lea		bx, msg_duplicate_n			; Carregar mensagem de "DUPLICATE_N"
+				jmp		print_msg
+
+print_msg:
+				call	printf_s					; Imprimir mensagem
+				line_feed
+				mov		return_code, dl				; Atualizar código de retorno
+				pop		bx							; Salvar registradores
+				ret
+
+handle_error	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	printf_s
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para imprimir uma string, permitindo a inclusão de um parâmetro opcional indicado por '%'.
+;
+;	Entrada:
+;		- BX (char *):	endereço da string a ser impressa
+;		- AX (char *):	endereço da string a ser inserida como parâmetro
+;----------------------------------------------------------------------------------------------------------------------
+printf_s		proc	near
+
+				push	bx							; Salvar registradores
+
+printf_s_loop:
+				mov		dl, [bx]					; Obter caractere atual
+				cmp		dl, NUL						; Verificar fim da string
+				je		printf_s_end
+				cmp		dl, '%'						; Verificar placeholder de parâmetro
+				je		printf_s_param
+
+				int_putchar							; Imprimir caractere
+
+printf_s_next:
+				inc		bx							; Próximo caractere
+				jmp		printf_s_loop
+
+printf_s_param:
+				push	bx							; Imprimir string parâmetro
+				mov		bx, ax
+				call	printf_s
+				pop		bx
+				jmp		printf_s_next
+
+printf_s_end:
+				pop		bx							; Retornar registradores
+				ret
+
+printf_s		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	printf_d
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para imprimir um número inteiro.
+;
+;	Entrada:
+;		- BX (int):		número a ser impresso
+;----------------------------------------------------------------------------------------------------------------------
+printf_d		proc	near
+
+				mov		cx, 10000					; Inicializar contador
+				mov		leading_zero, TRUE			; Ativar flag de zero à esquerda
+
+printf_d_loop:
+				cmp		cx, 1						; while (CX > 1)
+				jng		printf_d_end
+
+				mov		dx, 0						; DX <- 0
+				mov		ax, bx						; AX <- n
+				div		cx							; DX <- (DX:AX) % CX
+				mov		ax, dx						; AX <- DX
+				call	divide_by_ten				; CX <- CX / 10
+				mov		dx, 0						; DX <- 0
+				div		cx							; AX <- (DX:AX) / CX
+
+				cmp		ax, 0						; Verificar se valor é 0
+				jne		printf_d_put
+				cmp		cx, 1						; Verificar se é o último dígito
+				je		printf_d_put
+				cmp		leading_zero, TRUE			; Verificar se é zero a esquerda
+				je		printf_d_loop
+
+printf_d_put:
+				mov		leading_zero, FALSE			; Desativar flag de zero à esquerda
+				mov		dl, al						; DL <- AL
+				add		dl, '0'						; Converter dígito para caractere
+				int_putchar							; Imprimir dígito
+				jmp		printf_d_loop
+
+printf_d_end:
+				ret
+
+printf_d		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	strlen
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para calcular o comprimento de uma string terminada em '\0'.
+;
+;	Entrada:
+;		- SI (char *):	endereço da string
+;
+;	Saída:
+;		- CX (int):		comprimento da string
+;----------------------------------------------------------------------------------------------------------------------
+strlen			proc	near
+
+				push	si							; Salvar registradores
+				mov		cx, 0						; Zerar contador
+
+count_char:
+				cmp		byte ptr [si], NUL			; Verificar fim da string
+				je		strlen_end
+				inc		cx							; Incrementar contador
+				inc		si							; Próximo caractere
+				jmp		count_char
+
+strlen_end:
+				pop		si							; Retornar registradores
+				ret
+
+strlen			endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	atoi
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para converter uma string de caracteres numéricos em um número inteiro.
+;
+;	Entrada:
+;		- SI (char *):	endereço da string
+;
+;	Saída:
+;		- AX (int):		número inteiro
+;----------------------------------------------------------------------------------------------------------------------
+atoi			proc	near
+
+				push	bx							; Salvar registradores
+				mov		ax, 0						; Zerar acumulador
+				mov		bl, 10						; Definir 10 como parâmetro para MUL
+
+check_nul:
+				cmp		byte ptr [si], NUL			; Verificar fim da string
+				je		atoi_end
+
+				cmp		byte ptr [si], '0'			; Verificar caractere não numérico
+				jl		atoi_error
+				cmp		byte ptr [si], '9'
+				jg		atoi_error
+
+				mul		bl							; AX <- AL * 10
+				add		ax, [si]					; AX <- AX + caractere
+				sub		ax, '0'						; AX <- AX - '0'
+
+				inc		si							; Próximo caractere
+				jmp		check_nul
+
+atoi_error:
+				mov		ax, ERROR
+
+atoi_end:
+				pop		bx							; Retornar registradores
+				ret
+
+atoi			endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	divide_by_ten
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para dividir um número por 10.
+;
+;	Entrada:
+;		- CX (int):		número a ser dividido
+;
+;	Saída:
+;		- CX (int):		número dividido por 10
+;----------------------------------------------------------------------------------------------------------------------
+divide_by_ten	proc	near
+
+				push	ax							; Salvar registradores
+				push	bx
+				push	dx
+
+				mov		ax, cx						; CX <- CX / 10
+				mov		dx, 0
+				mov		bx, 10
+				div		bx
+				mov		cx, ax
+
+				pop		dx							; Retornar registradores
+				pop		bx
+				pop		ax
+
+				ret
+
+divide_by_ten	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	join_segments
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para unir segmentos DS e ES.
+;----------------------------------------------------------------------------------------------------------------------
 join_segments	proc	near
 
 				mov		ax, ds
@@ -580,6 +646,6 @@ join_segments	proc	near
 
 join_segments	endp
 
-;======================================================================================================================
-				end
-;======================================================================================================================
+;----------------------------------------------------------------------------------------------------------------------
+	end
+;----------------------------------------------------------------------------------------------------------------------
