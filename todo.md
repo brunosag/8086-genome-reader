@@ -24,8 +24,8 @@
 
 ## Summary display
 
-- [ ] Display options info
-- [ ] Display input file info
+- [x] Display options info
+- [x] Display input file info
  
 ## Output file writing
 
