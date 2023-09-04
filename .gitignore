@@ -6,8 +6,9 @@
 # MASM files
 \MASM611
 
-# Helper files
+# Helper and test files
 \pack
+caso*
 
 # Object and executable files
 *.exe

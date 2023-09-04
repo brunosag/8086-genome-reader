@@ -12,16 +12,15 @@
 - [x] Handle error: invalid parameter
 - [x] Handle error: duplicate option
 
-## Input file reading
+## Input file validation
 
-- [ ] Count total of bases
-- [ ] Count each base type
-- [ ] Count total number of groups
-- [ ] Count number of lines that contain bases
-- [ ] Handle error: file does not exist
-- [ ] Handle error: not enough letters
-- [ ] Handle error: too many letters
-- [ ] Handle error: invalid letter
+- [x] Count total of bases
+- [x] Count total number of groups
+- [x] Count number of lines that contain bases
+- [x] Handle error: file does not exist
+- [x] Handle error: not enough letters
+- [x] Handle error: too many letters
+- [x] Handle error: invalid letter
 
 ## Summary display
 
