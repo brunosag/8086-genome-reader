@@ -16,5 +16,13 @@ caso*
 *.obj
 *.OBJ
 
+# Input and output files
+*.txt
+*.TXT
+*.out
+*.OUT
+*.csv
+*.CSV
+
 # VSCode files
 *.vscode

@@ -25,7 +25,7 @@ int_terminate	macro	return_code 					; INT 21,4C - Terminate Process With Return
 				int		21h
 endm
 
-line_feed		macro									; Print LF character
+line_feed		macro									; Imprimir caractere LF
 
 				push	dx
 				mov		dl, LF
@@ -33,7 +33,7 @@ line_feed		macro									; Print LF character
 				pop		dx
 endm
 
-backspace		macro									; Remove last printed character
+backspace		macro									; Remover último caractere impresso
 
 				push	dx
 				mov		dl, BS
@@ -45,16 +45,52 @@ backspace		macro									; Remove last printed character
 				pop		dx
 endm
 
+line_feed_f		macro									; Escrever caractere LF no arquivo de saída
+
+				mov		bx, write_handle
+				mov		cx, 1
+				lea		dx,	write_buffer
+				mov		write_buffer, LF
+				call	fwrite
+endm
+
+seek_backward_byte		macro	handle					; Descolar ponteiro do arquivo 1 byte para trás
+
+				push	cx
+				push	dx
+				mov		al, SEEK_CUR
+				mov		bx, handle
+				mov		cx, -1
+				mov		dx,	-1
+				call	fseek
+				pop		dx
+				pop		cx
+endm
+
+fread_c			macro									; Ler caractere do arquivo de entrada
+
+				push	cx
+				push	dx
+				mov		bx, read_handle
+				mov		cx, 1
+				lea		dx, read_buffer
+				call	fread
+				pop		dx
+				pop		cx
+endm
+
 ;======================================================================================================================
 ;	Constantes
 ;======================================================================================================================
 
 ; Geral
-TRUE						equ		1
-FALSE						equ		0
 ERROR						equ		-1
+FALSE						equ		0
+READ_ONLY					equ		0
+TRUE						equ		1
+SEEK_CUR					equ		1
 STR_SIZE					equ		128
-BUFFER_SIZE					equ		20000
+MAX_BASE_COUNT				equ		10000
 
 ; Caracteres
 NUL							equ		0
@@ -64,11 +100,7 @@ LF							equ		10
 CR							equ		13
 SPACE						equ		32
 DBQ							equ		34
-
-; Modos de accesso
-READ_ONLY					equ		0
-WRITE_ONLY					equ		1
-READ_WRITE					equ		2
+CSV_DELIM					equ		59
 
 ; Códigos de retorno
 SUCCESS						equ		0
@@ -98,6 +130,7 @@ leading_zero				db		TRUE
 argv 						db		STR_SIZE dup(0)
 argv_cursor					dw		argv
 token						dw		?
+option_buffer				dw		?
 
 ; Controle de parâmetros
 input_file					db		STR_SIZE dup(0)
@@ -112,42 +145,52 @@ f_provided					db		FALSE
 o_provided					db		FALSE
 n_provided					db		FALSE
 
-; Leitura do arquivo
-file_handle					dw		?
-file_buffer					db		BUFFER_SIZE dup(0)
+; Leitura do arquivo de entrada
+read_handle					dw		?
+read_buffer					db		?, NUL
 base_count					dw		0
 group_count					dw		0
 line_count					dw		1
 base_line_count				dw		0
+new_line					db		TRUE
+nul_terminated_char			db		?, NUL
+
+; Escrita do arquivo de saída
+write_handle				dw		?
+current_handle				dw		?
+write_buffer				db		?
 a_count						dw		0
 t_count						dw		0
 c_count						dw		0
 g_count						dw		0
-new_line					db		TRUE
-nul_terminated_char			db		?, NUL
+header_a					db		"A;", NUL
+header_t					db		"T;", NUL
+header_c					db		"C;", NUL
+header_g					db		"G;", NUL
+header_plus					db		"A+T;C+G;", NUL
 
 ; Mensagens de erro
-msg_invalid_n				db		"ERRO: parâmetro ", DBQ, "%s", DBQ, " é inválido para -n. Informe um número maior ou igual a 1.", NUL
-msg_invalid_option			db		"ERRO: opção ", DBQ, "%s", DBQ, " é inválida.", NUL
-msg_missing_f				db		"ERRO: opção -f não encontrada. Informe o arquivo de entrada.", NUL
-msg_missing_n				db		"ERRO: opção -n não encontrada. Informe o tamanho dos grupos de bases.", NUL
-msg_missing_atcg			db		"ERRO: opção -<atcg+> não encontrada. Informe as bases a serem processadas.", NUL
-msg_duplicate_f				db		"ERRO: opção -f foi fornecida mais de uma vez. Informe apenas um arquivo de entrada.", NUL
-msg_duplicate_o				db		"ERRO: opção -o foi fornecida mais de uma vez. Informe apenas um arquivo de saída.", NUL
-msg_duplicate_n				db		"ERRO: opção -n foi fornecida mais de uma vez. Informe apenas um tamanho dos grupos de bases.", NUL
-msg_file_not_exist			db		"ERRO: arquivo ", DBQ, "%s", DBQ, " não existe.", NUL
-msg_invalid_base			db		"ERRO: base '%s' na linha %d é inválida. Apenas A, T, C e G são aceitas.", NUL
-msg_not_enough_bases		db		"ERRO: número de bases insuficiente. Forneça pelo menos %d bases no arquivo de entrada.", NUL
-msg_too_many_bases			db		"ERRO: arquivo muito grande. São aceitas no máximo 10.000 bases nitrogenadas.", NUL
+msg_invalid_n				db		"ERRO: parametro ", DBQ, "%s", DBQ, " e invalido para -n. Informe um numero maior ou igual a 1.", NUL
+msg_invalid_option			db		"ERRO: opcao ", DBQ, "%s", DBQ, " e invalida.", NUL
+msg_missing_f				db		"ERRO: opcao -f nao encontrada. Informe o arquivo de entrada.", NUL
+msg_missing_n				db		"ERRO: opcao -n nao encontrada. Informe o tamanho dos grupos de bases.", NUL
+msg_missing_atcg			db		"ERRO: opcao -<atcg+> nao encontrada. Informe as bases a serem processadas.", NUL
+msg_duplicate_f				db		"ERRO: opcao -f foi fornecida mais de uma vez. Informe apenas um arquivo de entrada.", NUL
+msg_duplicate_o				db		"ERRO: opcao -o foi fornecida mais de uma vez. Informe apenas um arquivo de saida.", NUL
+msg_duplicate_n				db		"ERRO: opcao -n foi fornecida mais de uma vez. Informe apenas um tamanho dos grupos de bases.", NUL
+msg_file_not_exist			db		"ERRO: arquivo ", DBQ, "%s", DBQ, " nao existe.", NUL
+msg_invalid_base			db		"ERRO: base '%s' na linha %d e invalida. Apenas A, T, C e G sao aceitas.", NUL
+msg_not_enough_bases		db		"ERRO: numero de bases insuficiente. Forneca pelo menos %d bases no arquivo de entrada.", NUL
+msg_too_many_bases			db		"ERRO: arquivo muito grande. Sao aceitas no maximo 10.000 bases nitrogenadas.", NUL
 
 ; Resumo
-summary_header				db		72 dup('-'), LF, 27 dup(' '), "8086_genome_reader", LF, 23 dup(' '), "Relatório de Processamento", LF, 72 dup('-'), LF, NUL
-summary_title_options		db		"Opções Utilizadas:", LF, NUL
+summary_header				db		72 dup('-'), LF, 27 dup(' '), "8086_genome_reader", LF, 23 dup(' '), "Relatorio de Processamento", LF, 72 dup('-'), LF, NUL
+summary_title_options		db		"Opcoes Utilizadas:", LF, NUL
 summary_input_file			db		TAB, "- Arquivo de entrada:", 3 dup(TAB), "%s", LF, NUL
-summary_output_file			db		TAB, "- Arquivo de saída:", 3 dup(TAB), "%s", LF, NUL
+summary_output_file			db		TAB, "- Arquivo de saida:", 3 dup(TAB), "%s", LF, NUL
 summary_group_size			db		TAB, "- Tamanho dos grupos de bases:", 2 dup(TAB), "%d", LF, NUL
-summary_included_bases		db		TAB, "- Bases do arquivo de saída:", 2 dup(TAB), NUL
-summary_title_input_file	db		"Informações do Arquivo de Entrada:", LF, NUL
+summary_included_bases		db		TAB, "- Bases do arquivo de saida:", 2 dup(TAB), NUL
+summary_title_input_file	db		"Informacoes do Arquivo de Entrada:", LF, NUL
 summary_base_count			db		TAB, "- Total de bases:", 3 dup(TAB), "%d", LF, NUL
 summary_group_count			db		TAB, "- Total de grupos:", 3 dup(TAB), "%d", LF, NUL
 summary_base_line_count		db		TAB, "- Total de linhas com bases:", 2 dup(TAB), "%d", LF, NUL
@@ -169,13 +212,14 @@ list_plus					db		"A+T;C+G, ", NUL
 				call	parse_options					; Extrair opções da string da linha de commando
 				call	validate_input_file				; Validar arquivo de entrada
 				call	print_summary					; Exibir resumo das informações de processamento
+				call	write_output_file				; Escrever arquivo de saída
 
 				int_terminate	return_code				; Terminar programa com código de sucesso
 
 .exit
 
 ;----------------------------------------------------------------------------------------------------------------------
-;	getargv
+;	get_argv
 ;----------------------------------------------------------------------------------------------------------------------
 ;	Função para obter a string de argumentos da linha de comando e armazenar na variável 'argv'.
 ;----------------------------------------------------------------------------------------------------------------------
@@ -210,7 +254,7 @@ get_argv		endp
 ;----------------------------------------------------------------------------------------------------------------------
 ;	Função para extrair as opções de uma string de argumentos e as armazenar nas variáveis correspondentes.
 ;----------------------------------------------------------------------------------------------------------------------
-parse_options		proc	near
+parse_options	proc	near
 
 				call	argv_tok						; Obter primeiro token
 
@@ -223,6 +267,7 @@ check_token:
 check_option:
 				cmp		byte ptr [bx], '-'				; Verificar início de opção ('-')
 				jne		next_token
+				mov		option_buffer, bx
 				inc		bx								; Pular caractere '-'
 
 token_char:
@@ -308,7 +353,7 @@ case_plus:
 
 case_default:
 				mov		dl, ERROR_INVALID_OPTION		; Tratar erro: opção inválida
-				mov		ax, token
+				mov		ax, option_buffer
 				call	handle_error
 				jmp		next_token
 
@@ -330,15 +375,15 @@ check_missing_n:
 
 check_missing_atcg:
 				cmp		include_a, TRUE					; Verificar opção -<atcg+> faltante
-				je		get_options_end
+				je		parse_options_end
 				cmp		include_t, TRUE
-				je		get_options_end
+				je		parse_options_end
 				cmp		include_c, TRUE
-				je		get_options_end
+				je		parse_options_end
 				cmp		include_g, TRUE
-				je		get_options_end
+				je		parse_options_end
 				cmp		include_plus, TRUE
-				je		get_options_end
+				je		parse_options_end
 				jmp		handle_missing_atcg
 
 handle_missing_f:
@@ -354,7 +399,7 @@ handle_missing_n:
 handle_missing_atcg:
 				mov		dl, ERROR_MISSING_ACTG			; Tratar erro: opção -<atcg+> faltante
 				call	handle_error
-				jmp		get_options_end
+				jmp		parse_options_end
 
 handle_duplicate_f:
 				mov		dl, ERROR_DUPLICATE_F			; Tratar erro: opção -f duplicada
@@ -371,13 +416,13 @@ handle_duplicate_n:
 				call	handle_error
 				jmp		next_char
 
-get_options_end:
+parse_options_end:
 				cmp		return_code, SUCCESS			; Verificar se houve erros
-				je		get_options_ret
+				je		parse_options_ret
 
 				int_terminate	return_code				; Terminar programa com código de erro
 
-get_options_ret:
+parse_options_ret:
 				ret
 
 parse_options				endp
@@ -392,38 +437,28 @@ validate_input_file		proc	near
 				mov		al, READ_ONLY					; Definir leitura como modo de acesso
 				lea		dx, input_file					; Carregar endereço do nome do arquivo
 				call	fopen							; Abrir arquivo
-				mov		file_handle, ax					; Salvar handle do arquivo
+				mov		read_handle, ax					; Salvar handle do arquivo
 
 validate_input_file_loop:
-				cmp		base_count, 10000				; Verificar máximo de bases
+				cmp		base_count, MAX_BASE_COUNT		; Verificar máximo de bases
 				jge		handle_too_many_bases
 
-				mov		bx, file_handle					; Carregar handle do arquivo
-				lea		dx, file_buffer					; Carregar endereço do buffer
-				mov		cx, 1							; Definir leitura de 1 byte
+				fread_c									; Ler caractere
 
-				call	fread							; Ler caractere
 				cmp		ax, 0							; Verificar fim do arquivo
 				je		check_min_bases
 
-				mov		bx, dx
-				cmp		byte ptr [bx], 'A'				; Verificar caractere válido
+				call	is_base							; Verificar base
+				cmp		ax, TRUE
 				je		count_base
-				cmp		byte ptr [bx], 'T'
-				je		count_base
-				cmp		byte ptr [bx], 'C'
-				je		count_base
-				cmp		byte ptr [bx], 'G'
-				je		count_base
-				cmp		byte ptr [bx], LF				; Verificar quebra de linha
+				cmp		read_buffer, LF					; Verificar quebra de linha
 				je		count_line
-				cmp		byte ptr [bx], CR
+				cmp		read_buffer, CR
 				je		validate_input_file_loop
 				jmp		handle_invalid_base
 
 count_base:
 				inc		base_count						; Contar base
-
 				cmp		new_line, TRUE					; Verificar nova linha
 				jne		validate_input_file_loop
 				inc		base_line_count					; Contar linha com base
@@ -437,10 +472,7 @@ count_line:
 
 handle_invalid_base:
 				mov		dl,	ERROR_INVALID_BASE			; Tratar erro: base inválida
-				mov		al, [bx]
-				lea		si, nul_terminated_char
-				mov		[si], al
-				lea		ax, nul_terminated_char
+				lea		ax, read_buffer
 				mov		bx,	line_count
 				call	handle_error
 				jmp		validate_input_file_end
@@ -463,7 +495,7 @@ validate_input_file_end:
 				inc		ax
 				mov		group_count, ax
 
-				mov		bx, file_handle					; Fechar arquivo
+				mov		bx, read_handle					; Fechar arquivo
 				call	fclose
 				cmp		return_code, SUCCESS			; Verificar se houve erros
 				je		validate_input_file_ret
@@ -519,6 +551,62 @@ print_summary	proc	near
 				ret
 
 print_summary	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	write_output_file
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para criar um arquivo de saída e registrar a contagem de bases para cada grupo.
+;----------------------------------------------------------------------------------------------------------------------
+write_output_file	proc	near
+
+				lea		dx, output_file					; Criar e abrir arquivo de saída
+				call	fcreate
+				mov		write_handle, ax
+
+				mov		al, READ_ONLY					; Abrir arquivo de entrada
+				lea		dx, input_file
+				call	fopen
+				mov		read_handle, ax
+
+				call	write_output_header				; Escrever cabeçalho da saída
+
+				mov		cx, group_size
+
+first_group_loop:
+				push	cx								; Escrever primeiro grupo
+				fread_c
+				mov		al, read_buffer
+				call	inc_count
+				pop		cx
+				add		cx, dx
+				loop	first_group_loop
+				call	write_group
+
+write_output_file_loop:
+				mov		bx,	read_handle					; Deslocar para início do grupo atual
+				mov		dx, group_size
+				call	seek_backward
+				fread_c									; Ler caractere e decrementar seu contador
+				mov		al, read_buffer
+				call	dec_count
+				dec		dx								; Deslocar para fim do próximo grupo
+				call	seek_forward
+				fread_c									; Ler caractere
+				cmp		AX, 0							; Verificar fim do arquivo
+				je		write_output_file_end
+				mov		al, read_buffer
+				call	inc_count						; Incrementar contador da base
+				call	write_group						; Escrever grupo
+				jmp		write_output_file_loop
+
+write_output_file_end:
+				mov		bx, read_handle					; Fechar arquivo de entrada
+				call	fclose
+				mov		bx, write_handle				; Fechar arquivo de saída
+				call	fclose
+				ret
+
+write_output_file	endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	argv_tok
@@ -665,6 +753,65 @@ print_msg:
 
 handle_error	endp
 
+;----------------------------------------------------------------------------------------------------------------------
+;	write_group
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para imprimir a contagem de bases para cada grupo no arquivo de saída.
+;----------------------------------------------------------------------------------------------------------------------
+write_group		proc	near
+
+write_group_a:
+				cmp		include_a, TRUE					; Verificar inclusão da base A
+				jne		write_group_t
+				mov		bx, a_count						; Escrever contagem de A
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+
+write_group_t:
+				cmp		include_t, TRUE					; Verificar inclusão da base T
+				jne		write_group_c
+				mov		bx, t_count						; Escrever contagem de T
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+
+write_group_c:
+				cmp		include_c, TRUE					; Verificar inclusão da base C
+				jne		write_group_g
+				mov		bx, c_count						; Escrever contagem de C
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+
+write_group_g:
+				cmp		include_g, TRUE					; Verificar inclusão da base G
+				jne		write_group_plus
+				mov		bx, g_count						; Escrever contagem de G
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+
+write_group_plus:
+				cmp		include_plus, TRUE				; Verificar inclusão das bases A+T;C+G
+				jne		write_group_end
+				mov		bx, a_count						; Escrever contagem de A+T
+				add		bx, t_count
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+				mov		bx, c_count						; Escrever contagem de C+G
+				add		bx, g_count
+				call	fwrite_d
+				mov		dl, CSV_DELIM					; Escrever delimitador
+				call	putchar_f
+
+write_group_end:
+				seek_backward_byte	write_handle		; Apagar último delimitador
+				line_feed_f								; Quebrar linha
+				ret
+
+write_group		endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	print_included_bases
@@ -704,12 +851,167 @@ print_plus:
 				call	printf
 
 print_included_bases_end:
+				backspace								; Remover última vírgula e espaço
 				backspace
-				backspace
-				line_feed
+				line_feed								; Quebrar linha
 				ret
 
 print_included_bases	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	write_output_header
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para escrever o cabeçalho do arquivo de saída, incluindo as bases selecionadas.
+;----------------------------------------------------------------------------------------------------------------------
+write_output_header		proc	near
+
+				mov		bx, write_handle				; Carregar handle do arquivo de saída
+				mov		cx, 2							; Definir escrita de 2 bytes
+
+write_a:
+				cmp		include_a, TRUE					; Verificar inclusão da base A
+				jne		write_t
+				lea		dx, header_a					; Escrever base A
+				call	fwrite
+
+write_t:
+				cmp		include_t, TRUE					; Verificar inclusão da base T
+				jne		write_c
+				lea		dx, header_t					; Escrever base C
+				call	fwrite
+
+write_c:
+				cmp		include_c, TRUE					; Verificar inclusão da base C
+				jne		write_g
+				lea		dx, header_c					; Escrever base C
+				call	fwrite
+
+write_g:
+				cmp		include_g, TRUE					; Verificar inclusão da base G
+				jne		write_plus
+				lea		dx, header_g					; Escrever base G
+				call	fwrite
+
+write_plus:
+				cmp		include_plus, TRUE				; Verificar inclusão das bases A+T;C+G
+				jne		write_output_header_end
+				mov		cx, 8							; Definir escrita de 8 bytes
+				lea		dx, header_plus					; Escrever base A+T;C+G
+				call	fwrite
+
+write_output_header_end:
+				seek_backward_byte 	write_handle		; Remover último ';'
+				line_feed_f								; Quebrar linha
+				ret
+
+write_output_header		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	seek_forward
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para deslocar o ponteiro do arquivo n bytes para frente, ignorando não-bases.
+;
+;	Entrada:
+;		- BX (char *):	handle do arquivo
+;		- DX (int):		número de bytes a deslocar
+;----------------------------------------------------------------------------------------------------------------------
+seek_forward	proc	near
+
+				push	ax								; Salvar registradores
+				push	bx
+				push	cx
+				push	dx
+
+				mov		current_handle, bx				; Armazenar handle
+				mov		cx, dx							; Inicializar contador
+
+seek_forward_loop:
+				fread_c									; Ler caractere
+				call	is_base							; Verificar se caracatere é base
+				cmp		ax, TRUE
+				je		seek_forward_iterate
+				jmp		seek_forward_loop				; Iterar sem alterar contador
+
+seek_forward_iterate:
+				loop	seek_forward_loop				; Iterar
+
+seek_forward_loop_end:
+				fread_c									; Ler caractere
+				cmp		ax, 0							; Verificar fim do arquivo
+				je		seek_forward_end
+				call	is_base							; Verificar se caractere é base
+				cmp		ax, FALSE
+				je		seek_forward_loop_end
+				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
+
+seek_forward_end:
+				pop		dx								; Retornar registradores
+				pop		cx
+				pop		bx
+				pop		ax
+				ret
+
+seek_forward	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	seek_backward
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para deslocar o ponteiro do arquivo n bytes para trás, ignorando não-bases.
+;
+;	Entrada:
+;		- BX (char *):	handle do arquivo
+;		- DX (int):		número de bytes a deslocar
+;----------------------------------------------------------------------------------------------------------------------
+seek_backward	proc	near
+
+				push	ax								; Salvar registradores
+				push	bx
+				push	cx
+				push	dx
+
+				mov		current_handle, bx				; Armazenar handle
+				mov		cx, dx							; Inicializar contador
+
+seek_backward_loop:
+				seek_backward_byte	current_handle		; Deslocar 1 byte para trás
+				fread_c									; Ler caractere
+				call	is_base							; Checar se caractere é base
+				cmp		ax, TRUE
+				je		seek_backward_iterate
+				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
+				jmp		seek_backward_loop				; Iterar sem alterar contador
+
+seek_backward_iterate:
+				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
+				loop	seek_backward_loop				; Iterar
+				pop		dx								; Retornar registradores
+				pop		cx
+				pop		bx
+				pop		ax
+				ret
+
+seek_backward	endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	fcreate
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para criar e abrir um arquivo.
+;
+;	Entrada:
+;		- DX (char *):	endereço do nome do arquivo
+;
+;	Saída:
+;		- AX (char *):	handle do arquivo criado
+;----------------------------------------------------------------------------------------------------------------------
+fcreate			proc	near
+
+				mov		cx, 0							; Zerar atributos do arquivo
+
+				mov		ah, 3Ch							; INT 21,3C - Create File Using Handle
+				int		21h
+				ret
+
+fcreate			endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	fopen
@@ -733,6 +1035,7 @@ fopen			proc	near
 				mov		dl, ERROR_FILE_NOT_EXIST		; Tratar erro: arquivo não existe
 				lea		ax, input_file
 				call	handle_error
+
 				int_terminate	return_code				; Terminar programa com código de erro
 
 fopen_end:
@@ -780,6 +1083,51 @@ fread			proc	near
 fread			endp
 
 ;----------------------------------------------------------------------------------------------------------------------
+;	fwrite
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para escrever o conteúdo de um buffer em um arquivo.
+;
+;	Entrada:
+;		- BX (char *):	handle do arquivo
+;		- DX (char *):	endereço do buffer
+;		- CX (int):		número de bytes a serem escritos
+;
+;	Saída:
+;		- AX (int):		número de bytes escritos
+;----------------------------------------------------------------------------------------------------------------------
+fwrite			proc	near
+
+				mov		ah, 40h							; INT 21,40 - Write To File or Device Using Handle
+				int		21h
+
+				ret
+
+fwrite			endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	fseek
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para descolar o ponteiro de um arquivo.
+;
+;	Entrada:
+;		- AL (int):		origem do deslocamento
+;		- BX (char *):	handle do arquivo
+;		- CX (int):		número de bytes a descolar (high)
+;		- DX (int):		número de bytes a descolar (low)
+;
+;	Saída:
+;		- AX (int):		nova localização do ponteiro
+;----------------------------------------------------------------------------------------------------------------------
+fseek			proc	near
+
+				mov		ah, 42h							; INT 21,42 - Move File Pointer Using Handle
+				int		21h
+
+				ret
+
+fseek			endp
+
+;----------------------------------------------------------------------------------------------------------------------
 ;	printf
 ;----------------------------------------------------------------------------------------------------------------------
 ;	Função para imprimir uma string, permitindo a inclusão opcional de uma string, indicada
@@ -791,6 +1139,11 @@ fread			endp
 ;		- DX (int):		número inteiro a ser inserido como parâmetro
 ;----------------------------------------------------------------------------------------------------------------------
 printf			proc	near
+
+				int 3
+				push	ax								; Salvar registradores
+				push	bx
+				push	dx
 
 				mov		bx, dx							; Salvar decimal e liberar DX
 
@@ -810,55 +1163,33 @@ printf_next:
 printf_param:
 				inc		si								; Verificar parâmetro string ou decimal
 				cmp		byte ptr [si], 's'
-				je		printf_str
+				je		printf_param_str
 				cmp		byte ptr [si], 'd'
-				je		printf_int
+				je		printf_param_int
 
 				dec		si								; Imprimir '%' normalmente
 				call	putchar
 				jmp		printf_loop
 
-printf_str:
+printf_param_str:
 				push	si								; Imprimir string parâmetro
 				mov		si, ax
-				call	printf_s
+				call	printf
 				pop		si
 				jmp		printf_next
 
-printf_int:
+printf_param_int:
 				call	printf_d						; Imprimir decimal parâmetro
 				jmp		printf_next
 
 printf_end:
+							; Retornar registradores
+				pop		dx
+				pop		bx
+				pop		ax
 				ret
 
 printf			endp
-
-;----------------------------------------------------------------------------------------------------------------------
-;	printf_s
-;----------------------------------------------------------------------------------------------------------------------
-;	Função para imprimir uma string terminada em '\0'.
-;
-;	Entrada:
-;		- SI (char *):	endereço da string a ser impressa
-;----------------------------------------------------------------------------------------------------------------------
-printf_s		proc	near
-
-printf_s_loop:
-				cmp		byte ptr [si], NUL				; Verificar fim da string
-				je		printf_s_end
-
-				mov		dl, byte ptr [si]				; Imprimir caractere
-				call	putchar
-
-printf_s_next:
-				inc		si								; Próximo caractere
-				jmp		printf_s_loop
-
-printf_s_end:
-				ret
-
-printf_s		endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	printf_d
@@ -903,6 +1234,78 @@ printf_d_end:
 				ret
 
 printf_d		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	fwrite_d
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para escrever um número inteiro no arquivo.
+;
+;	Entrada:
+;		- BX (int):		número a ser impresso
+;----------------------------------------------------------------------------------------------------------------------
+fwrite_d		proc	near
+
+				mov		cx, 10000						; Inicializar contador
+				mov		leading_zero, TRUE				; Ativar flag de zero à esquerda
+
+fwrite_d_loop:
+				cmp		cx, 1							; while (CX > 1)
+				jng		fwrite_d_end
+
+				mov		dx, 0							; DX <- 0
+				mov		ax, bx							; AX <- n
+				div		cx								; DX <- (DX:AX) % CX
+				mov		ax, dx							; AX <- DX
+				call	divide_by_ten					; CX <- CX / 10
+				mov		dx, 0							; DX <- 0
+				div		cx								; AX <- (DX:AX) / CX
+
+				cmp		ax, 0							; Verificar se valor é 0
+				jne		fwrite_d_put
+				cmp		cx, 1							; Verificar se é o último dígito
+				je		fwrite_d_put
+				cmp		leading_zero, TRUE				; Verificar se é zero a esquerda
+				je		fwrite_d_loop
+
+fwrite_d_put:
+				mov		leading_zero, FALSE				; Desativar flag de zero à esquerda
+				mov		dl, al							; DL <- AL
+				add		dl, '0'							; Converter dígito para caractere
+				call	putchar_f						; Escrever caractere no arquivo
+				jmp		fwrite_d_loop
+
+fwrite_d_end:
+				ret
+
+fwrite_d		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	putchar_f
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para escrever um caractere no arquivo.
+;
+;	Entrada:
+;		- DL (char):	caractere a ser impresso
+;----------------------------------------------------------------------------------------------------------------------
+putchar_f		proc	near
+
+				push	bx								; Salvar registradores
+				push	cx
+				push	dx
+
+				mov		write_buffer, dl				; Carregar buffer de escrita
+				mov		bx, write_handle
+				mov		cx, 1
+				lea		dx, write_buffer
+
+				call	fwrite							; Escrever caractere
+
+				pop		dx								; Retornar registradores
+				pop		cx
+				pop		bx
+				ret
+
+putchar_f		endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	putchar
@@ -994,6 +1397,116 @@ atoi_end:
 				ret
 
 atoi			endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	inc_count
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para incrementar contador da base informada
+;
+;	Entrada:
+;		- AL (char):	base
+;	Saída:
+;		- DX (int):		0 se for base, 1 se contrário
+;----------------------------------------------------------------------------------------------------------------------
+inc_count		proc	near
+
+				mov		dx, 0
+
+				cmp		al, 'A'							; Identificar base
+				je		inc_a
+				cmp		al, 'T'
+				je		inc_t
+				cmp		al, 'C'
+				je		inc_c
+				cmp		al, 'G'
+				je		inc_g
+				mov		dx, 1
+				jmp		inc_count_end
+
+inc_a:													; Incrementar contador correspondente
+				inc		a_count
+				jmp		inc_count_end
+inc_t:
+				inc		t_count
+				jmp		inc_count_end
+inc_c:
+				inc		c_count
+				jmp		inc_count_end
+inc_g:
+				inc		g_count
+				jmp		inc_count_end
+
+inc_count_end:
+				ret
+
+inc_count		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	dec_count
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para decrementar contador da base informada
+;
+;	Entrada:
+;		- AL (char):	base
+;----------------------------------------------------------------------------------------------------------------------
+dec_count		proc	near
+
+				cmp		al, 'A'							; Identificar base
+				je		dec_a
+				cmp		al, 'T'
+				je		dec_t
+				cmp		al, 'C'
+				je		dec_c
+				cmp		al, 'G'
+				je		dec_g
+				jmp		dec_count_end
+
+dec_a:													; Decrementar contador correspondente
+				dec		a_count
+				jmp		dec_count_end
+dec_t:
+				dec		t_count
+				jmp		dec_count_end
+dec_c:
+				dec		c_count
+				jmp		dec_count_end
+dec_g:
+				dec		g_count
+				jmp		dec_count_end
+
+dec_count_end:
+				ret
+
+dec_count		endp
+
+;----------------------------------------------------------------------------------------------------------------------
+;	is_base
+;----------------------------------------------------------------------------------------------------------------------
+;	Função para verificar se caractere no buffer de leitura é uma base.
+;
+;	Saída:
+;		- AX (int):		TRUE caso afirmativo, FALSE caso negativo.
+;----------------------------------------------------------------------------------------------------------------------
+is_base			proc	near
+
+				cmp		read_buffer, 'A'
+				je		is_base_true
+				cmp		read_buffer, 'T'
+				je		is_base_true
+				cmp		read_buffer, 'C'
+				je		is_base_true
+				cmp		read_buffer, 'G'
+				je		is_base_true
+
+is_base_false:
+				mov		ax, FALSE
+				ret
+
+is_base_true:
+				mov		ax, TRUE
+				ret
+
+is_base			endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	divide_by_ten
