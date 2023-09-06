@@ -54,7 +54,7 @@ line_feed_f		macro									; Escrever caractere LF no arquivo de saída
 				call	fwrite
 endm
 
-seek_backward_byte		macro	handle					; Descolar ponteiro do arquivo 1 byte para trás
+backspace_f		macro	handle							; Descolar ponteiro do arquivo 1 byte para trás
 
 				push	cx
 				push	dx
@@ -63,18 +63,6 @@ seek_backward_byte		macro	handle					; Descolar ponteiro do arquivo 1 byte para 
 				mov		cx, -1
 				mov		dx,	-1
 				call	fseek
-				pop		dx
-				pop		cx
-endm
-
-fread_c			macro									; Ler caractere do arquivo de entrada
-
-				push	cx
-				push	dx
-				mov		bx, read_handle
-				mov		cx, 1
-				lea		dx, read_buffer
-				call	fread
 				pop		dx
 				pop		cx
 endm
@@ -148,6 +136,7 @@ n_provided					db		FALSE
 ; Leitura do arquivo de entrada
 read_handle					dw		?
 read_buffer					db		?, NUL
+base_buffer					db		10000 dup(0), NUL
 base_count					dw		0
 group_count					dw		0
 line_count					dw		1
@@ -443,7 +432,10 @@ validate_input_file_loop:
 				cmp		base_count, MAX_BASE_COUNT		; Verificar máximo de bases
 				jge		handle_too_many_bases
 
-				fread_c									; Ler caractere
+				mov		bx, read_handle					; Ler caractere
+				mov		cx, 1
+				lea		dx, read_buffer
+				call	fread
 
 				cmp		ax, 0							; Verificar fim do arquivo
 				je		check_min_bases
@@ -458,6 +450,10 @@ validate_input_file_loop:
 				jmp		handle_invalid_base
 
 count_base:
+				lea		si, base_buffer					; Adicionar base ao buffer de bases
+				add		si, base_count
+				mov		al, read_buffer
+				mov		[si], al
 				inc		base_count						; Contar base
 				cmp		new_line, TRUE					; Verificar nova linha
 				jne		validate_input_file_loop
@@ -563,45 +559,32 @@ write_output_file	proc	near
 				call	fcreate
 				mov		write_handle, ax
 
-				mov		al, READ_ONLY					; Abrir arquivo de entrada
-				lea		dx, input_file
-				call	fopen
-				mov		read_handle, ax
-
 				call	write_output_header				; Escrever cabeçalho da saída
 
-				mov		cx, group_size
+				lea		si, base_buffer					; Carregar buffer de bases
+				mov		cx, group_size					; Inicializar contador do primeiro grupo
 
 first_group_loop:
-				push	cx								; Escrever primeiro grupo
-				fread_c
-				mov		al, read_buffer
+				mov		al, [si]						; Escrever primeiro grupo
 				call	inc_count
-				pop		cx
-				add		cx, dx
+				inc		si
 				loop	first_group_loop
 				call	write_group
 
 write_output_file_loop:
-				mov		bx,	read_handle					; Deslocar para início do grupo atual
-				mov		dx, group_size
-				call	seek_backward
-				fread_c									; Ler caractere e decrementar seu contador
-				mov		al, read_buffer
-				call	dec_count
-				dec		dx								; Deslocar para fim do próximo grupo
-				call	seek_forward
-				fread_c									; Ler caractere
-				cmp		AX, 0							; Verificar fim do arquivo
+				cmp		[si], NUL						; Verificar fim das bases
 				je		write_output_file_end
-				mov		al, read_buffer
-				call	inc_count						; Incrementar contador da base
+				mov		al, [si]						; Incrementar contador do caractere atual
+				call	inc_count
+				sub		si, group_size					; Deslocar para início do grupo atual
+				mov		al, [si]
+				call	dec_count						; Decrementar contador do caractere
+				add		si, group_size					; Deslocar para início do próximo grupo
+				inc		si
 				call	write_group						; Escrever grupo
 				jmp		write_output_file_loop
 
 write_output_file_end:
-				mov		bx, read_handle					; Fechar arquivo de entrada
-				call	fclose
 				mov		bx, write_handle				; Fechar arquivo de saída
 				call	fclose
 				ret
@@ -807,7 +790,7 @@ write_group_plus:
 				call	putchar_f
 
 write_group_end:
-				seek_backward_byte	write_handle		; Apagar último delimitador
+				backspace_f		write_handle			; Apagar último delimitador
 				line_feed_f								; Quebrar linha
 				ret
 
@@ -900,97 +883,11 @@ write_plus:
 				call	fwrite
 
 write_output_header_end:
-				seek_backward_byte 	write_handle		; Remover último ';'
+				backspace_f 	write_handle			; Remover último ';'
 				line_feed_f								; Quebrar linha
 				ret
 
 write_output_header		endp
-
-;----------------------------------------------------------------------------------------------------------------------
-;	seek_forward
-;----------------------------------------------------------------------------------------------------------------------
-;	Função para deslocar o ponteiro do arquivo n bytes para frente, ignorando não-bases.
-;
-;	Entrada:
-;		- BX (char *):	handle do arquivo
-;		- DX (int):		número de bytes a deslocar
-;----------------------------------------------------------------------------------------------------------------------
-seek_forward	proc	near
-
-				push	ax								; Salvar registradores
-				push	bx
-				push	cx
-				push	dx
-
-				mov		current_handle, bx				; Armazenar handle
-				mov		cx, dx							; Inicializar contador
-
-seek_forward_loop:
-				fread_c									; Ler caractere
-				call	is_base							; Verificar se caracatere é base
-				cmp		ax, TRUE
-				je		seek_forward_iterate
-				jmp		seek_forward_loop				; Iterar sem alterar contador
-
-seek_forward_iterate:
-				loop	seek_forward_loop				; Iterar
-
-seek_forward_loop_end:
-				fread_c									; Ler caractere
-				cmp		ax, 0							; Verificar fim do arquivo
-				je		seek_forward_end
-				call	is_base							; Verificar se caractere é base
-				cmp		ax, FALSE
-				je		seek_forward_loop_end
-				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
-
-seek_forward_end:
-				pop		dx								; Retornar registradores
-				pop		cx
-				pop		bx
-				pop		ax
-				ret
-
-seek_forward	endp
-
-;----------------------------------------------------------------------------------------------------------------------
-;	seek_backward
-;----------------------------------------------------------------------------------------------------------------------
-;	Função para deslocar o ponteiro do arquivo n bytes para trás, ignorando não-bases.
-;
-;	Entrada:
-;		- BX (char *):	handle do arquivo
-;		- DX (int):		número de bytes a deslocar
-;----------------------------------------------------------------------------------------------------------------------
-seek_backward	proc	near
-
-				push	ax								; Salvar registradores
-				push	bx
-				push	cx
-				push	dx
-
-				mov		current_handle, bx				; Armazenar handle
-				mov		cx, dx							; Inicializar contador
-
-seek_backward_loop:
-				seek_backward_byte	current_handle		; Deslocar 1 byte para trás
-				fread_c									; Ler caractere
-				call	is_base							; Checar se caractere é base
-				cmp		ax, TRUE
-				je		seek_backward_iterate
-				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
-				jmp		seek_backward_loop				; Iterar sem alterar contador
-
-seek_backward_iterate:
-				seek_backward_byte	current_handle		; Corrigir deslocamento do fread_c
-				loop	seek_backward_loop				; Iterar
-				pop		dx								; Retornar registradores
-				pop		cx
-				pop		bx
-				pop		ax
-				ret
-
-seek_backward	endp
 
 ;----------------------------------------------------------------------------------------------------------------------
 ;	fcreate
@@ -1140,7 +1037,6 @@ fseek			endp
 ;----------------------------------------------------------------------------------------------------------------------
 printf			proc	near
 
-				int 3
 				push	ax								; Salvar registradores
 				push	bx
 				push	dx
@@ -1405,12 +1301,8 @@ atoi			endp
 ;
 ;	Entrada:
 ;		- AL (char):	base
-;	Saída:
-;		- DX (int):		0 se for base, 1 se contrário
 ;----------------------------------------------------------------------------------------------------------------------
 inc_count		proc	near
-
-				mov		dx, 0
 
 				cmp		al, 'A'							; Identificar base
 				je		inc_a
@@ -1420,7 +1312,6 @@ inc_count		proc	near
 				je		inc_c
 				cmp		al, 'G'
 				je		inc_g
-				mov		dx, 1
 				jmp		inc_count_end
 
 inc_a:													; Incrementar contador correspondente
